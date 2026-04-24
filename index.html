@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>XOXO — Online Tic-Tac-Toe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Firebase SDK -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getDatabase, ref, set, get, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+    // ─── DEV 1 OWNS THIS FILE: firebase-config.js ───────────────────────────
+    // Replace with your Firebase project config
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+      projectId: "YOUR_PROJECT",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getDatabase(app);
+
+    // Make db accessible to networking.js module below
+    window.__db  = db;
+    window.__ref = ref;
+    window.__set = set;
+    window.__get = get;
+    window.__onValue = onValue;
+    window.__update  = update;
+
+    // Signal that Firebase is ready
+    window.dispatchEvent(new Event("firebase-ready"));
+  </script>
+
+  <style>
+    /* ═══════════════════════════════════════════
+       DEV 2 OWNS: All CSS below (ui.css section)
+       DEV 1 OWNS: JS logic in game.js / networking.js
+    ═══════════════════════════════════════════ */
+
+    :root {
+      --bg:        #0a0a0f;
+      --surface:   #13131c;
+      --border:    #2a2a3d;
+      --x-color:   #ff4757;
+      --o-color:   #1ed4ff;
+      --text:      #e8e8f0;
+      --muted:     #5a5a78;
+      --win-glow:  #ffd700;
+      --cell-size: clamp(90px, 22vw, 130px);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Animated grid background */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 60px 60px;
+      opacity: 0.25;
+      animation: gridDrift 20s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes gridDrift {
+      from { transform: translate(0,0); }
+      to   { transform: translate(60px,60px); }
+    }
+
+    /* ── LOBBY ── */
+    #lobby {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+      animation: fadeUp .5s ease both;
+    }
+
+    h1 {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(3.5rem, 10vw, 6rem);
+      letter-spacing: 0.12em;
+      background: linear-gradient(135deg, var(--x-color), var(--o-color));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      line-height: 1;
+    }
+
+    .tagline {
+      color: var(--muted);
+      font-size: 0.75rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      width: 280px;
+    }
+
+    input[type="text"] {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.9rem;
+      padding: 12px 16px;
+      border-radius: 6px;
+      outline: none;
+      transition: border-color .2s;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    input[type="text"]::placeholder { color: var(--muted); text-transform: none; letter-spacing: normal; }
+    input[type="text"]:focus { border-color: var(--o-color); }
+
+    .btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.8rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      padding: 13px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all .2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    .btn-x  { border-color: var(--x-color); color: var(--x-color); }
+    .btn-x::after  { background: var(--x-color); }
+    .btn-o  { border-color: var(--o-color);  color: var(--o-color);  }
+    .btn-o::after  { background: var(--o-color); }
+    .btn:hover::after { opacity: 0.12; }
+    .btn:active { transform: scale(0.97); }
+
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 280px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      letter-spacing: 0.15em;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── GAME SCREEN ── */
+    #game {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      animation: fadeUp .4s ease both;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: calc(var(--cell-size) * 3 + 8px);
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .room-id-display {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      letter-spacing: 0.1em;
+      cursor: pointer;
+      transition: border-color .2s;
+    }
+    .room-id-display:hover { border-color: var(--o-color); }
+
+    #status-msg {
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      min-height: 1.2em;
+      transition: color .3s;
+    }
+    #status-msg.x  { color: var(--x-color); }
+    #status-msg.o  { color: var(--o-color); }
+    #status-msg.win { color: var(--win-glow); }
+
+    /* ── BOARD ── */
+    #board {
+      display: grid;
+      grid-template-columns: repeat(3, var(--cell-size));
+      grid-template-rows:    repeat(3, var(--cell-size));
+      gap: 4px;
+      position: relative;
+    }
+
+    .cell {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: calc(var(--cell-size) * 0.52);
+      cursor: pointer;
+      transition: background .15s, border-color .15s, transform .1s;
+      user-select: none;
+      position: relative;
+      overflow: hidden;
+    }
+    .cell:hover:not(.taken) {
+      background: #1c1c2a;
+      border-color: var(--muted);
+    }
+    .cell:active:not(.taken) { transform: scale(0.95); }
+
+    .cell.x {
+      color: var(--x-color);
+      border-color: rgba(255,71,87,0.3);
+      background: rgba(255,71,87,0.05);
+      animation: popIn .2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+    .cell.o {
+      color: var(--o-color);
+      border-color: rgba(30,212,255,0.3);
+      background: rgba(30,212,255,0.05);
+      animation: popIn .2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    }
+    .cell.win-cell {
+      border-color: var(--win-glow) !important;
+      background: rgba(255,215,0,0.08) !important;
+      animation: winPulse 1s ease infinite alternate;
+    }
+    .cell.taken { cursor: not-allowed; }
+
+    @keyframes popIn {
+      from { transform: scale(0.3) rotate(-15deg); opacity: 0; }
+      to   { transform: scale(1)   rotate(0deg);   opacity: 1; }
+    }
+    @keyframes winPulse {
+      from { box-shadow: 0 0 0 0 rgba(255,215,0,0.2); }
+      to   { box-shadow: 0 0 20px 4px rgba(255,215,0,0.3); }
+    }
+
+    /* Score row */
+    .scores {
+      display: flex;
+      gap: 16px;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .score-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-align: center;
+      min-width: 70px;
+    }
+    .score-block .label { color: var(--muted); font-size: 0.6rem; display: block; margin-bottom: 2px; }
+    .score-block .val   { font-size: 1.2rem; font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.1em; }
+    .score-block.x-score .val { color: var(--x-color); }
+    .score-block.o-score .val { color: var(--o-color); }
+
+    .btn-sm {
+      font-size: 0.7rem;
+      padding: 8px 16px;
+    }
+
+    /* ── WAITING OVERLAY ── */
+    #waiting {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      text-align: center;
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 2px solid var(--border);
+      border-top-color: var(--o-color);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .share-code {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 2.5rem;
+      letter-spacing: 0.2em;
+      color: var(--o-color);
+    }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      opacity: 0;
+      transition: all .3s;
+      pointer-events: none;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     LOBBY SCREEN
+══════════════════════════════════════ -->
+<div id="lobby">
+  <h1>XOXO</h1>
+  <p class="tagline">Real-time · Online · Tic-Tac-Toe</p>
+
+  <div class="input-group">
+    <input type="text" id="name-input" placeholder="Your name" maxlength="12" />
+    <button class="btn btn-x" id="create-btn">⊕ Create Room</button>
+  </div>
+
+  <div class="divider">or join</div>
+
+  <div class="input-group">
+    <input type="text" id="room-input" placeholder="Room code" maxlength="6" />
+    <button class="btn btn-o" id="join-btn">→ Join Room</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     WAITING FOR OPPONENT
+══════════════════════════════════════ -->
+<div id="waiting">
+  <p class="tagline">Waiting for opponent</p>
+  <div class="share-code" id="display-room-code">——</div>
+  <p style="color:var(--muted);font-size:.7rem;letter-spacing:.1em">Share this code</p>
+  <div class="spinner"></div>
+  <button class="btn btn-sm" id="cancel-btn" style="margin-top:8px">Cancel</button>
+</div>
+
+<!-- ══════════════════════════════════════
+     GAME SCREEN
+══════════════════════════════════════ -->
+<div id="game">
+  <div class="status-bar">
+    <span id="status-msg">—</span>
+    <span class="room-id-display" id="room-label" title="Click to copy">⊞ ——</span>
+  </div>
+
+  <div id="board">
+    <div class="cell" data-index="0"></div>
+    <div class="cell" data-index="1"></div>
+    <div class="cell" data-index="2"></div>
+    <div class="cell" data-index="3"></div>
+    <div class="cell" data-index="4"></div>
+    <div class="cell" data-index="5"></div>
+    <div class="cell" data-index="6"></div>
+    <div class="cell" data-index="7"></div>
+    <div class="cell" data-index="8"></div>
+  </div>
+
+  <div class="scores">
+    <div class="score-block x-score">
+      <span class="label" id="x-label">X</span>
+      <span class="val" id="x-score">0</span>
+    </div>
+    <div class="score-block" style="min-width:50px">
+      <span class="label">Draw</span>
+      <span class="val" id="draw-score" style="color:var(--muted)">0</span>
+    </div>
+    <div class="score-block o-score">
+      <span class="label" id="o-label">O</span>
+      <span class="val" id="o-score">0</span>
+    </div>
+  </div>
+
+  <button class="btn btn-sm" id="rematch-btn" style="display:none">↺ Rematch</button>
+  <button class="btn btn-sm" id="leave-btn" style="margin-top:4px">✕ Leave</button>
+</div>
+
+<div id="toast"></div>
+
+<!-- ══════════════════════════════════════
+     DEV 1 — game.js  (Game Logic)
+     DEV 2 — networking.js  (Firebase/UI)
+══════════════════════════════════════ -->
+<script src="game.js"></script>
+<script src="networking.js"></script>
+
+</body>
+</html>
